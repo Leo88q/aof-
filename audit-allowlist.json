@@ -1,0 +1,12 @@
+{
+  "comment": "[SECURITY_CHECKLIST #66] Reviewed exceptions for scripts/audit-gate.mjs. Every entry needs a reason and an expiry date (max ~6 months); expired entries fail CI.",
+  "advisories": [
+    {
+      "url": "https://github.com/advisories/GHSA-3gc7-fjrx-p6mg",
+      "package": "bigint-buffer",
+      "via": "@solana/spl-token -> @solana/buffer-layout-utils -> bigint-buffer (aof_backend)",
+      "reason": "No patched release exists; npm's suggested fix is a downgrade to @solana/spl-token@0.1.8. The backend only reaches toBigIntLE() on account data from its own RPC reads, never on client-supplied buffers. Re-evaluate when spl-token drops buffer-layout-utils.",
+      "expires": "2026-12-31"
+    }
+  ]
+}

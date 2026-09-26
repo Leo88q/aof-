@@ -28,6 +28,8 @@ export type AuthorityMode = "hot" | "read-only";
 export interface AuthorityEnv {
   AUTHORITY_MODE?: string | undefined;
   AUTHORITY_SECRET_KEY?: string | undefined;
+  /** [SECURITY_CHECKLIST #65] Docker-secret file holding the key (production form). */
+  AUTHORITY_SECRET_KEY_FILE?: string | undefined;
   AUTHORITY_PUBKEY?: string | undefined;
   ALLOW_HOT_AUTHORITY_KEY?: string | undefined;
 }
@@ -52,8 +54,16 @@ export function evaluateAuthorityGate(env: AuthorityEnv, isProduction: boolean):
     };
   }
   const mode: AuthorityMode = rawMode;
-  const hasSecret = Boolean(env.AUTHORITY_SECRET_KEY);
+  const hasSecret = Boolean(env.AUTHORITY_SECRET_KEY || env.AUTHORITY_SECRET_KEY_FILE);
   const warnings: string[] = [];
+  if (env.AUTHORITY_SECRET_KEY && env.AUTHORITY_SECRET_KEY_FILE) {
+    return {
+      ok: false,
+      mode,
+      warnings,
+      reason: "AUTHORITY_SECRET_KEY and AUTHORITY_SECRET_KEY_FILE are both set: keep only the file",
+    };
+  }
 
   if (mode === "hot") {
     if (!hasSecret) {
@@ -61,7 +71,9 @@ export function evaluateAuthorityGate(env: AuthorityEnv, isProduction: boolean):
         ok: false,
         mode,
         warnings,
-        reason: 'AUTHORITY_MODE=hot requires AUTHORITY_SECRET_KEY (or switch to AUTHORITY_MODE=read-only)',
+        reason:
+          "AUTHORITY_MODE=hot requires AUTHORITY_SECRET_KEY_FILE (or AUTHORITY_SECRET_KEY outside production), " +
+          "or switch to AUTHORITY_MODE=read-only",
       };
     }
     if (isProduction && env.ALLOW_HOT_AUTHORITY_KEY !== "1") {
@@ -74,6 +86,16 @@ export function evaluateAuthorityGate(env: AuthorityEnv, isProduction: boolean):
           "Set AUTHORITY_MODE=read-only (authority signing disabled, routes " +
           "return 503 until Squads/KMS is wired up), or explicitly " +
           "acknowledge the hot-key risk with ALLOW_HOT_AUTHORITY_KEY=1.",
+      };
+    }
+    if (isProduction && env.AUTHORITY_SECRET_KEY) {
+      return {
+        ok: false,
+        mode,
+        warnings,
+        reason:
+          "Production takes the hot key only from AUTHORITY_SECRET_KEY_FILE (a Docker secret), " +
+          "never from an environment variable [SECURITY_CHECKLIST #65]",
       };
     }
     if (isProduction) {

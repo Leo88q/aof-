@@ -38,9 +38,31 @@ assert.ok(/ALLOW_HOT_AUTHORITY_KEY=1/.test(refused.reason || ""), "reason must n
 assert.ok(/read-only/.test(refused.reason || ""), "reason must name read-only alternative");
 
 // 3. hot + prod + explicit acknowledgment — allowed, with a warning
-const acked = case_("hot prod acked", { AUTHORITY_MODE: "hot", AUTHORITY_SECRET_KEY: SECRET, ALLOW_HOT_AUTHORITY_KEY: "1" }, true, true);
+const acked = case_("hot prod acked (file)", { AUTHORITY_MODE: "hot", AUTHORITY_SECRET_KEY_FILE: "/run/secrets/authority_secret_key", ALLOW_HOT_AUTHORITY_KEY: "1" }, true, true);
 assert.equal(acked.warnings.length, 1, "must warn once");
 assert.ok(/Squads\/KMS/.test(acked.warnings[0]), "warning must point to the real fix");
+
+// 3b. [SECURITY_CHECKLIST #65] production never takes the key from an env var,
+// even acknowledged; both forms at once are ambiguous everywhere.
+const envInProd = case_("hot prod acked but env var", { AUTHORITY_MODE: "hot", AUTHORITY_SECRET_KEY: SECRET, ALLOW_HOT_AUTHORITY_KEY: "1" }, true, false);
+assert.ok(/AUTHORITY_SECRET_KEY_FILE/.test(envInProd.reason || ""), "reason must point to the Docker-secret file");
+case_("both forms", { AUTHORITY_SECRET_KEY: SECRET, AUTHORITY_SECRET_KEY_FILE: "/run/secrets/k" }, false, false);
+case_("hot dev file", { AUTHORITY_SECRET_KEY_FILE: "/run/secrets/k" }, false, true);
+case_("read-only with file", { AUTHORITY_MODE: "read-only", AUTHORITY_SECRET_KEY_FILE: "/run/secrets/k", AUTHORITY_PUBKEY: PUBKEY }, true, false);
+
+// 3c. readSecret: file form, production refusal of the env form, ambiguity.
+{
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { readSecret } = require("../src/security/secretFiles");
+  const fs = require("fs"), os = require("os"), path = require("path");
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aof-secret-")), "k");
+  fs.writeFileSync(file, "  s3cret\n", { mode: 0o600 });
+  assert.equal(readSecret("K", { K_FILE: file }, true), "s3cret", "file form, trimmed");
+  assert.equal(readSecret("K", { K: "dev" }, false), "dev", "env form allowed outside production");
+  assert.throws(() => readSecret("K", { K: "prod" }, true), /Docker secret/, "env form refused in production");
+  assert.throws(() => readSecret("K", { K: "a", K_FILE: file }, false), /both set/);
+  assert.equal(readSecret("K", {}, true), undefined);
+}
 
 // 4. hot without a secret — refuse
 case_("hot no secret", { AUTHORITY_MODE: "hot" }, false, false);

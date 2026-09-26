@@ -15,6 +15,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 import fs from "fs";
 import path from "path";
+import { readSecret } from "../security/secretFiles";
 
 const KEYSTORE_DIR =
   process.env.SESSION_KEYSTORE_DIR ||
@@ -24,7 +25,7 @@ type EncryptedEntry = { v: 2; user: string; publicKey: string; iv: string; tag: 
 
 /** 32-byte keystore key from SESSION_KEYSTORE_KEY (base64 or hex), or null. */
 export function keystoreKey(): Buffer | null {
-  const raw = (process.env.SESSION_KEYSTORE_KEY || "").trim();
+  const raw = (readSecret("SESSION_KEYSTORE_KEY") || "").trim();
   if (!raw) return null;
   const key = /^[0-9a-fA-F]{64}$/.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
   if (key.length !== 32) throw new Error("SESSION_KEYSTORE_KEY must decode to exactly 32 bytes");

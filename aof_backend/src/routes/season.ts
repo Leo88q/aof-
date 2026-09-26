@@ -7,6 +7,7 @@ import { program } from "../provider";
 import { authPda, configPda, materialMintsPda, seasonPassPda, seasonPda } from "../lib/pda";
 import { authorityOnly, coSign, pk } from "../lib/tx";
 import { requireAdmin } from "../middleware/adminAuth";
+import { requireNoFraudHold } from "../security/fraudHold";
 
 const r = Router();
 
@@ -90,7 +91,7 @@ r.post("/xp/grant", requireAdmin, async (req, res) => {
   }
 });
 
-r.post("/reward/claim", requireAdmin, async (req, res) => {
+r.post("/reward/claim", requireAdmin, requireNoFraudHold("owner", "season_reward_claim"), async (req, res) => {
   try {
     const owner = pk(req.body.owner);
     const seasonId = Number(req.body.seasonId);

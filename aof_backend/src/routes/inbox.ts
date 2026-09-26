@@ -15,6 +15,7 @@ import { RESOURCE_UNIT } from "../lib/miningPayout";
 import { requireIdempotency } from "../middleware/security";
 import { requireAdmin } from "../middleware/adminAuth";
 import { requireWalletProof } from "../security/walletProof";
+import { requireNoFraudHold } from "../security/fraudHold";
 
 const r = Router();
 
@@ -146,7 +147,7 @@ r.post("/read", requireWalletProof("inbox_read", "user"), async (req, res) => {
 });
 
 // Забрать награду из письма (явный клейм + реальное ончейн-начисление)
-r.post("/claim", requireWalletProof("inbox_claim", "user"), requireIdempotency, async (req, res) => {
+r.post("/claim", requireWalletProof("inbox_claim", "user"), requireNoFraudHold("user", "inbox_claim"), requireIdempotency, async (req, res) => {
   try {
     const { id, user } = req.body;
     const item = await db.inboxItem.findUnique({ where: { id } });

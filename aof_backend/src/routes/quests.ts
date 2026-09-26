@@ -13,6 +13,7 @@ import {
 import { authorityOnly, coSign, pk } from "../lib/tx";
 import { requireCircuitOpen, requireWalletLimits, requireIdempotency } from "../middleware/security";
 import { requireAdmin } from "../middleware/adminAuth";
+import { requireNoFraudHold } from "../security/fraudHold";
 
 const r = Router();
 
@@ -67,7 +68,7 @@ r.post("/quest/init", requireAdmin, async (req, res) => {
 });
 
 // Клейм награды за выполненный квест
-r.post("/quest/claim", requireCircuitOpen, requireWalletLimits("quests_claim"), requireIdempotency, async (req, res) => {
+r.post("/quest/claim", requireCircuitOpen, requireWalletLimits("quests_claim"), requireNoFraudHold("user", "quest_claim"), requireIdempotency, async (req, res) => {
   try {
     const user = pk(req.body.user);
     const questId = Number(req.body.questId);

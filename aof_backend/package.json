@@ -26,6 +26,7 @@
     "test:resource-registry": "ts-node --project tsconfig.json --transpile-only scripts/resourceRegistrySelfTest.ts",
     "test:security-invariants": "ts-node --project tsconfig.json --transpile-only scripts/securityInvariantSelfTest.ts",
     "test:session-keystore": "ts-node --project tsconfig.json --transpile-only scripts/sessionKeystoreSelfTest.ts",
+    "test:fraud-hold": "ts-node --project tsconfig.json --transpile-only scripts/fraudHoldSelfTest.ts",
     "test:idempotency-db": "NODE_PATH=$PWD/node_modules ts-node --project tsconfig.json --transpile-only scripts/idempotencyIntegrationTest.ts",
     "test:idempotency-db:pg": "prisma generate --schema prisma/postgres/schema.prisma && NODE_PATH=$PWD/node_modules ts-node --project tsconfig.json --transpile-only scripts/idempotencyIntegrationTest.ts",
     "test:audit-security": "ts-node --project tsconfig.json --transpile-only scripts/auditSecuritySelfTest.ts",

@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import { evaluateAuthorityGate } from "./security/authorityGate";
+import { readSecret } from "./security/secretFiles";
 
 const isProduction = process.env.NODE_ENV === "production";
 export const RPC_URL = process.env.RPC_URL || "https://api.devnet.solana.com";
@@ -41,7 +42,7 @@ export const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID);
  */
 export const AUTHORITY: Keypair | null =
   authorityDecision.mode === "hot"
-    ? Keypair.fromSecretKey(bs58.decode(process.env.AUTHORITY_SECRET_KEY as string))
+    ? Keypair.fromSecretKey(bs58.decode(readSecret("AUTHORITY_SECRET_KEY") as string))
     : null;
 /** The authority PUBLIC key in both modes — use this for accounts/PDAs. */
 export const AUTHORITY_PUBKEY: PublicKey = AUTHORITY

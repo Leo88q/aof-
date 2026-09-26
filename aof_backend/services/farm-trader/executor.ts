@@ -1,45 +1,16 @@
-import { sendConfirmedTransaction } from "../../src/lib/transactionLifecycle";
 /**
- * Исполнитель сделок: вызывает ончейн инструкции от имени пользователя
- * через сессионный ключ.
+ * Исполнитель сделок farm-trader — ТОЛЬКО симуляция.
  *
- * [ФИКС Группы 3] Реальный режим (FARM_TRADER_SIMULATION=false):
- *   - грузит сессионный ключ из кейстора (lib/sessionKeys)
- *   - проверяет сессию ончейн: существует, не отозвана, не протухла
- *   - проверяет SPL-делегирование на ATA инструмента (юзер выдаёт через
- *     token::approve — без него бот не может двигать инструмент)
- *   - собирает sell_into_queue, подписывает сессионным ключом
- *     (комиссию транзакции платит authority), отправляет
- *
- * Поток подключения авто-торговли для пользователя:
- *   1) POST /session/create-trader  -> подписать tx (делегирование инструкций)
- *   2) token::approve на ATA инструмента в пользу сессионного ключа
- *   3) правила в traderRules исполняются автоматически
- *
- * buy/bid/cancel пока в симуляции: эти инструкции ещё не принимают
- * сессионного подписанта на уровне контракта — подключение отдельно.
+ * [SECURITY_CHECKLIST #47/#65, decision 2026-09-26] The real mode was removed:
+ * it signed with a server-held session key that the player had to approve as
+ * an SPL delegate on their tool ATA, so a leaked keystore meant stolen NFTs and
+ * the delegation never expired. Auto-trading may come back only on top of
+ * program-level session permissions (scoped instructions, limits, expiry),
+ * never through token delegation to a server key.
  */
 import { PrismaClient } from "@prisma/client";
-import { PublicKey, Transaction } from "@solana/web3.js";
-import {
-  getAssociatedTokenAddressSync,
-  getAccount,
-  TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
-import BN from "bn.js";
-import { connection, marketProgram, assertExpectedCluster } from "../../src/provider";
-import { AUTHORITY } from "../../src/config";
-import {
-  hotMarketPoolPda,
-  hotMarketQueuePda,
-  sessionTokenPda,
-} from "../../src/lib/pda";
-import { loadSessionKeypair } from "../../src/lib/sessionKeys";
 
 const db = new PrismaClient();
-
-// Режим: симуляция пока контракты не задеплоены
-const SIMULATION_MODE = process.env.FARM_TRADER_SIMULATION !== "false";
 
 export interface ExecutionParams {
   user: string;
@@ -47,7 +18,7 @@ export interface ExecutionParams {
   action: string; // cancel | sell_into_queue | bid | buy
   mint?: string;
   price?: number;
-  rarity?: number; // [ФИКС] нужно для сборки ончейн инструкции
+  rarity?: number;
 }
 
 // Исполнение сделки
@@ -83,130 +54,12 @@ export async function executeTrade(params: ExecutionParams): Promise<{
     }
   }
 
-  // Режим симуляции: записываем что было бы исполнено
-  if (SIMULATION_MODE) {
-    console.log(`[farm-trader] SIMULATION: ${params.action} for ${params.user} at ${params.price}`);
-    return {
-      success: true,
-      signature: `SIM_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-    };
-  }
-
-  // ===== [ФИКС] РЕАЛЬНЫЙ РЕЖИМ =====
-  try {
-    if (params.action === "sell_into_queue") {
-      return await executeSellIntoQueueReal(params);
-    }
-    // buy/bid/cancel: инструкции пока не принимают сессионного подписанта —
-    // честно сообщаем вместо фейковой подписи (как было с PLACEHOLDER_)
-    return {
-      success: false,
-      error: `action ${params.action}: session signing not wired in contract yet`,
-    };
-  } catch (e: any) {
-    return { success: false, error: e.message };
-  }
-}
-
-// [ФИКС] Реальная авто-продажа через сессионный ключ
-async function executeSellIntoQueueReal(params: ExecutionParams): Promise<{
-  success: boolean;
-  signature?: string;
-  error?: string;
-}> {
-  // [AUDIT AOF-H1] Fail-closed: в AUTHORITY_MODE=read-only authority-секрета
-  // нет — комиссию платит authority, поэтому сделка не может быть подписана.
-  if (!AUTHORITY) {
-    return {
-      success: false,
-      error:
-        "Authority signing is disabled (AUTHORITY_MODE=read-only). " +
-        "Wire Squads/KMS or run with AUTHORITY_MODE=hot [AOF-H1].",
-    };
-  }
-  if (!params.mint) {
-    return { success: false, error: "auto-sell: mint инструмента не выбран (нет резолва инвентаря)" };
-  }
-  if (params.rarity === undefined) {
-    return { success: false, error: "auto-sell: rarity не задан в параметрах" };
-  }
-
-  const userPk = new PublicKey(params.user);
-  const mintPk = new PublicKey(params.mint);
-  const rarity = params.rarity;
-
-  // 1. Сессионный ключ из кейстора
-  const sessionKp = loadSessionKeypair(params.user);
-  if (!sessionKp) {
-    return { success: false, error: "нет сессионного ключа (нужен POST /session/create-trader)" };
-  }
-
-  // 2. Сессия ончейн: создана, не отозвана, не протухла
-  const [sessionToken] = sessionTokenPda(userPk, sessionKp.publicKey);
-  let session: any;
-  try {
-    session = await (marketProgram.account as any)["sessionToken"].fetch(sessionToken);
-  } catch {
-    return { success: false, error: "сессия не создана ончейн (юзер не подписал tx одобрения)" };
-  }
-  if (session.revoked) {
-    return { success: false, error: "сессия отозвана" };
-  }
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (nowSec > Number(session.validUntil.toString())) {
-    return { success: false, error: "сессия протухла (нужно пересоздать)" };
-  }
-
-  // 3. Пул: текущая цена для защитного min_price (проскальзывание вниз 5%)
-  const [pool] = hotMarketPoolPda(rarity);
-  const poolAcc: any = await (marketProgram.account as any)["hotMarketPool"].fetch(pool);
-  const currentPrice = Number(poolAcc.currentPriceMascot.toString());
-  const minPrice = new BN(Math.floor((currentPrice * 9500) / 10000));
-
-  // 4. SPL-делегирование: без него бот не может перевести инструмент
-  const sellerToolToken = getAssociatedTokenAddressSync(mintPk, userPk);
-  const poolToolToken = getAssociatedTokenAddressSync(mintPk, pool, true);
-  try {
-    const tokenAcc = await getAccount(connection, sellerToolToken);
-    const delegateOk =
-      tokenAcc.delegate !== null &&
-      tokenAcc.delegate.toBase58() === sessionKp.publicKey.toBase58();
-    const amountOk = tokenAcc.delegatedAmount >= BigInt(1);
-    if (!delegateOk || !amountOk) {
-      return {
-        success: false,
-        error: "нет SPL-делегирования сессионному ключу на ATA инструмента (нужен token::approve)",
-      };
-    }
-  } catch (e: any) {
-    return { success: false, error: `ATA инструмента не найден: ${e.message}` };
-  }
-
-  // 5. Транзакция: комиссию платит authority, подписывает сессионный ключ
-  const [queue] = hotMarketQueuePda(rarity);
-  const ix = await (marketProgram.methods as any)
-    .hotMarketSellIntoQueue(rarity, minPrice)
-    .accounts({
-      pool,
-      queue,
-      seller: userPk,
-      signer: sessionKp.publicKey,
-      sessionToken,
-      toolMint: mintPk,
-      sellerToolToken,
-      poolToolToken,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .instruction();
-
-  const tx = new Transaction().add(ix);
-  tx.feePayer = AUTHORITY.publicKey;
-  await assertExpectedCluster();
-  const lifetime = await connection.getLatestBlockhash("confirmed");
-  tx.recentBlockhash = lifetime.blockhash;
-  tx.partialSign(AUTHORITY, sessionKp);
-  const sig = await sendConfirmedTransaction(connection, tx, lifetime);
-  return { success: true, signature: sig };
+  // Simulation only: record what would have been executed.
+  console.log(`[farm-trader] SIMULATION: ${params.action} for ${params.user} at ${params.price}`);
+  return {
+    success: true,
+    signature: `SIM_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+  };
 }
 
 // Запись исполнения в БД

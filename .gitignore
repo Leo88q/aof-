@@ -107,3 +107,6 @@ __pycache__/
 watchtower/node_modules
 watchtower/.env
 watchtower/dist/
+
+# [SECURITY_CHECKLIST #65] Docker secret files (docker-compose.secrets.yml)
+secrets/

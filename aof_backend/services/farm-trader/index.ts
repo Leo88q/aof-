@@ -102,7 +102,7 @@ async function checkAllRules() {
 async function main() {
   console.log("[farm-trader] Запуск воркера авто-торговли");
   console.log(`[farm-trader] Интервал проверки: ${CHECK_INTERVAL_MS}ms`);
-  console.log(`[farm-trader] Режим: ${process.env.FARM_TRADER_SIMULATION === "false" ? "реальный" : "симуляция"}`);
+  console.log("[farm-trader] Режим: только симуляция (реальный режим удалён — см. executor.ts)");
 
   // Периодическая проверка правил
   setInterval(() => {

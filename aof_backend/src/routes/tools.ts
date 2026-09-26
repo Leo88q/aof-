@@ -25,6 +25,7 @@ import { MINT_SIZE, createInitializeMintInstruction, createAssociatedTokenAccoun
 import { connection } from "../provider";
 import { criticalOperationGuard, requireCircuitOpen, requireWalletLimits } from "../middleware/security";
 import { requireAdmin } from "../middleware/adminAuth";
+import { assertNoFraudHold, sendFraudHold } from "../security/fraudHold";
 
 /**
  * [AUDIT F-01] Resolve the wallet that owns a token account (SPL layout:
@@ -499,6 +500,8 @@ r.post("/pay-out", requireAdmin, requireCircuitOpen, requireWalletLimits("tools_
     // the owner of the destination token account, which we read from chain so a
     // caller cannot pass a mismatched player.
     const recipient = await tokenAccountOwner(userToken);
+    // [SECURITY_CHECKLIST #48] no vault payout to a wallet under fraud review
+    await assertNoFraudHold([recipient.toBase58()], "vault_payout");
     const [player] = playerPda(recipient);
     const [vaultGuard] = vaultGuardPda(mint);
 
@@ -521,6 +524,7 @@ r.post("/pay-out", requireAdmin, requireCircuitOpen, requireWalletLimits("tools_
     const sig = await authorityOnly([ix]);
     res.json({ sig });
   } catch (e: any) {
+    if (sendFraudHold(res, e)) return;
     res.status(400).json({ error: e.message });
   }
 });

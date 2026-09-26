@@ -16,6 +16,8 @@ import {
 import { authorityOnly, coSign, pk } from "../lib/tx";
 import { requireCircuitOpen, requireWalletLimits, requireIdempotency } from "../middleware/security";
 import { requireAdmin } from "../middleware/adminAuth";
+import { assertNoFraudHold, sendFraudHold } from "../security/fraudHold";
+import { PublicKey } from "@solana/web3.js";
 
 const r = Router();
 
@@ -95,6 +97,9 @@ r.post("/pay-out", requireAdmin, requireCircuitOpen, requireWalletLimits("referr
     const [materialMints] = materialMintsPda();
     const [vault] = vaultPda();
     const [referralLink] = referralLinkPda(referred);
+    // [SECURITY_CHECKLIST #48] neither party of a referral payout may be under fraud review
+    const link: any = await (program.account as any)["referralLink"].fetch(referralLink);
+    await assertNoFraudHold([referred.toBase58(), new PublicKey(link.referrer).toBase58()], "referral_payout");
     const vaultToken = getAssociatedTokenAddressSync(mint, vault, true);
     // [AUDIT F-01] same three brakes as `pay_out` (see tools.ts).
     const [player] = playerPda(referred);
@@ -121,6 +126,7 @@ r.post("/pay-out", requireAdmin, requireCircuitOpen, requireWalletLimits("referr
     const sig = await authorityOnly([ix]);
     res.json({ sig });
   } catch (e: any) {
+    if (sendFraudHold(res, e)) return;
     res.status(400).json({ error: e.message });
   }
 });
